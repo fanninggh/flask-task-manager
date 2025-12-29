@@ -1,0 +1,119 @@
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: task-manager-pv
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: task-manager-pvc
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flask-config
+data:
+  FLASK_ENV: "production"
+  APP_NAME: "Task Manager"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: flask-secrets
+type: Opaque
+stringData:
+  SECRET_KEY: "change-this-in-production-12345"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-task-manager
+  labels:
+    app: flask-task-manager
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flask-task-manager
+  template:
+    metadata:
+      labels:
+        app: flask-task-manager
+    spec:
+      containers:
+      - name: flask-app
+        image: flask-task-manager:v1
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 5000
+        envFrom:
+        - configMapRef:
+            name: flask-config
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: flask-secrets
+              key: SECRET_KEY
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        volumeMounts:
+        - name: task-storage
+          mountPath: /app/instance
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: task-storage
+        persistentVolumeClaim:
+          claimName: task-manager-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-task-manager-service
+  labels:
+    app: flask-task-manager
+spec:
+  type: NodePort
+  selector:
+    app: flask-task-manager
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000
+    nodePort: 30080
